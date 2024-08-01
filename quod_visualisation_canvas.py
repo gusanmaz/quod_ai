@@ -2,14 +2,20 @@ import html
 from quod_game import QUOD_RED, QUOD_BLUE, QUAZAR, EMPTY_CELL, DISABLED_CELL, BOARD_SIZE, PLAYER_RED, PLAYER_BLUE
 
 
-def board_to_canvas(board, quazar_owners, last_move=None, winning_square=None):
+def board_to_canvas(board, quazar_owners, turn, move, player, last_move=None, winning_squares=None, is_final=False):
     cell_size = 30
     board_size = cell_size * BOARD_SIZE
+    canvas_id = f"quodBoard_turn{turn}_move{move}_player{player}"
 
     canvas_script = f"""
-    <canvas id="quodBoard" width="{board_size}" height="{board_size}"></canvas>
+    <canvas id="{canvas_id}" width="{board_size}" height="{board_size}"></canvas>
     <script>
-        const canvas = document.getElementById('quodBoard');
+    (function() {{
+        const canvas = document.getElementById('{canvas_id}');
+        if (!canvas) {{
+            console.error('Canvas element not found:', '{canvas_id}');
+            return;
+        }}
         const ctx = canvas.getContext('2d');
         const cellSize = {cell_size};
 
@@ -64,20 +70,22 @@ def board_to_canvas(board, quazar_owners, last_move=None, winning_square=None):
             ctx.strokeRect(col * cellSize, row * cellSize, cellSize, cellSize);
         }}
 
-        // Draw winning square
-        if ({winning_square}) {{
-            const square = {winning_square};
+        // Draw winning squares
+        if ({is_final} && {winning_squares}) {{
+            const winning_squares = {winning_squares};
             ctx.strokeStyle = 'yellow';
             ctx.lineWidth = 3;
-            for (let i = 0; i < 4; i++) {{
-                const [r1, c1] = square[i];
-                const [r2, c2] = square[(i + 1) % 4];
+            for (const square of winning_squares) {{
                 ctx.beginPath();
-                ctx.moveTo(c1 * cellSize + cellSize/2, r1 * cellSize + cellSize/2);
-                ctx.lineTo(c2 * cellSize + cellSize/2, r2 * cellSize + cellSize/2);
+                ctx.moveTo(square[0][1] * cellSize + cellSize/2, square[0][0] * cellSize + cellSize/2);
+                for (let i = 1; i < 4; i++) {{
+                    ctx.lineTo(square[i][1] * cellSize + cellSize/2, square[i][0] * cellSize + cellSize/2);
+                }}
+                ctx.closePath();
                 ctx.stroke();
             }}
         }}
+    }})();
     </script>
     """
     return canvas_script
@@ -107,7 +115,9 @@ def save_game_to_html(game, filename, player1, player2):
                 f.write(
                     f"<p>Piece: {'Quod' if piece_type in [QUOD_RED, QUOD_BLUE] else 'Quazar'}, Position: {move}</p>")
 
-                f.write(board_to_canvas(board, quazar_owners, move, game.winning_square))
+                is_final = (turn == len(game.moves) and idx == len(moves) - 1)
+                f.write(board_to_canvas(board, quazar_owners, turn, idx, player, last_move=move,
+                                        winning_squares=game.winning_square, is_final=is_final))
 
         winner = game.get_winner()
         winner_str = "Red" if winner == PLAYER_RED else "Blue" if winner == PLAYER_BLUE else "Draw"

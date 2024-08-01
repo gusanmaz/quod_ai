@@ -132,6 +132,20 @@ class QuodGame:
                 return PLAYER_BLUE
         return 0  # Draw or game not finished
 
+    def get_square_sides(self, square_points):
+        def distance_sq(p1, p2):
+            return (p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2
+
+        distances = [(i, j, distance_sq(square_points[i], square_points[j]))
+                     for i in range(4) for j in range(i + 1, 4)]
+
+        distances.sort(key=lambda x: x[2])
+
+        # The first 4 distances should be the sides
+        sides = distances[:4]
+
+        return [(square_points[side[0]], square_points[side[1]]) for side in sides]
+
     def __str__(self):
         symbols = {EMPTY_CELL: ' ', QUOD_RED: 'R', QUOD_BLUE: 'B', QUAZAR: 'Q', DISABLED_CELL: 'X'}
         return '\n'.join([''.join([symbols[cell] for cell in row]) for row in self.board])

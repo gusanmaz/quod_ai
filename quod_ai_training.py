@@ -6,40 +6,63 @@ from datetime import timedelta
 from typing import List, Tuple, Optional
 import argparse
 import os
+import platform
+import multiprocessing
+import random
 
 from quod_game import QuodGame, BOARD_SIZE, PLAYER_RED, PLAYER_BLUE, QUOD_RED, QUOD_BLUE, QUAZAR, EMPTY_CELL
+import quod_visualisation_svg as svg
 
-# Configure TensorFlow to use GPU
-physical_devices = tf.config.list_physical_devices('GPU')
-if physical_devices:
-    tf.config.experimental.set_memory_growth(physical_devices[0], True)
-    print("GPU is available and configured for use.")
-else:
-    print("No GPU found. Running on CPU.")
 
-# Suppress TensorFlow warnings
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-tf.get_logger().setLevel('ERROR')
+# Configure TensorFlow to use the appropriate device
+def configure_device():
+    system = platform.system()
+    if system == "Darwin":  # macOS
+        if tf.test.is_built_with_cuda():
+            print("CUDA is available. Using GPU.")
+            tf.config.experimental.set_visible_devices(tf.config.list_physical_devices('GPU')[0], 'GPU')
+        elif hasattr(tf.config, 'list_physical_devices') and 'GPU' in [device.device_type for device in
+                                                                       tf.config.list_physical_devices()]:
+            print("Metal is available. Using GPU.")
+            tf.config.experimental.set_visible_devices(tf.config.list_physical_devices('GPU')[0], 'GPU')
+        else:
+            print("No GPU found. Using CPU.")
+    elif system == "Linux" or system == "Windows":
+        if tf.test.is_built_with_cuda():
+            print("CUDA is available. Using GPU.")
+            tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('GPU')[0], True)
+        else:
+            print("No GPU found. Using CPU.")
+    else:
+        print(f"Unknown system: {system}. Using default configuration.")
+
+    # Suppress TensorFlow warnings
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    tf.get_logger().setLevel('ERROR')
+
+
+configure_device()
+
 
 def create_model():
-    with tf.device('/GPU:0'):
-        board_input = keras.layers.Input(shape=(BOARD_SIZE, BOARD_SIZE, 4))  # 4 channels: red, blue, quazar, empty
-        hardness_input = keras.layers.Input(shape=(1,))
+    board_input = keras.layers.Input(shape=(BOARD_SIZE, BOARD_SIZE, 4))  # 4 channels: red, blue, quazar, empty
+    hardness_input = keras.layers.Input(shape=(1,))
 
-        x = keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same')(board_input)
-        x = keras.layers.Conv2D(128, (3, 3), activation='relu', padding='same')(x)
-        x = keras.layers.Conv2D(128, (3, 3), activation='relu', padding='same')(x)
-        x = keras.layers.Flatten()(x)
+    x = keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same')(board_input)
+    x = keras.layers.Conv2D(128, (3, 3), activation='relu', padding='same')(x)
+    x = keras.layers.Conv2D(128, (3, 3), activation='relu', padding='same')(x)
+    x = keras.layers.Flatten()(x)
 
-        x = keras.layers.Concatenate()([x, hardness_input])
+    x = keras.layers.Concatenate()([x, hardness_input])
 
-        x = keras.layers.Dense(256, activation='relu')(x)
-        output = keras.layers.Dense(BOARD_SIZE * BOARD_SIZE, activation='softmax')(x)
+    x = keras.layers.Dense(256, activation='relu')(x)
+    output = keras.layers.Dense(BOARD_SIZE * BOARD_SIZE, activation='softmax')(x)
 
-        model = keras.Model(inputs=[board_input, hardness_input], outputs=output)
-        model.compile(optimizer='adam', loss='categorical_crossentropy')
+    model = keras.Model(inputs=[board_input, hardness_input], outputs=output)
+    model.compile(optimizer='adam', loss='categorical_crossentropy')
 
     return model
+
 
 class QuodAI:
     def __init__(self, hardness: float, model: Optional[keras.Model] = None):
@@ -56,7 +79,7 @@ class QuodAI:
         if not legal_moves:
             return None, None
 
-        if use_strategy and np.random.random() < self.hardness:
+        if use_strategy and random.random() < self.hardness:
             # Try strategic moves first
             strategic_move = self.get_strategic_move(game)
             if strategic_move:
@@ -146,6 +169,7 @@ class QuodAI:
                             return corner
         return None
 
+
 def play_game(ai_red: QuodAI, ai_blue: QuodAI, use_strategy: bool = True) -> Tuple[
     int, List[Tuple[np.ndarray, float, Tuple[int, int]]]]:
     game = QuodGame()
@@ -161,6 +185,7 @@ def play_game(ai_red: QuodAI, ai_blue: QuodAI, use_strategy: bool = True) -> Tup
         game.make_move(move[0], move[1], piece_type)
 
     return game.get_winner(), moves
+
 
 def train_model(model: keras.Model, num_games: int = 100000):
     start_time = time.time()
@@ -221,13 +246,6 @@ def train_model(model: keras.Model, num_games: int = 100000):
     print(f"Average games per second: {num_games / total_time:.2f}")
     return model
 
-def board_to_markdown(board):
-    symbols = {EMPTY_CELL: ' ', QUOD_RED: 'R', QUOD_BLUE: 'B', QUAZAR: 'Q'}
-    markdown = "| | " + " | ".join(str(i) for i in range(BOARD_SIZE)) + " |\n"
-    markdown += "|" + "-|" * (BOARD_SIZE + 1) + "\n"
-    for i, row in enumerate(board):
-        markdown += f"|{i}| " + " | ".join(symbols.get(cell, 'X') for cell in row) + " |\n"
-    return markdown
 
 def evaluate_ai(model: keras.Model, games: int = 1000, use_strategy: bool = True) -> dict:
     ai_strong = QuodAI(hardness=0.9, model=model)
@@ -236,113 +254,90 @@ def evaluate_ai(model: keras.Model, games: int = 1000, use_strategy: bool = True
 
     results = {
         "Strong vs Medium": [0, 0, 0],  # [Strong wins, Medium wins, Draws]
-        "Strong vs Weak": [0, 0, 0],    # [Strong wins, Weak wins, Draws]
-        "Medium vs Weak": [0, 0, 0]     # [Medium wins, Weak wins, Draws]
+        "Strong vs Weak": [0, 0, 0],  # [Strong wins, Weak wins, Draws]
+        "Medium vs Weak": [0, 0, 0]  # [Medium wins, Weak wins, Draws]
     }
 
     strategy_type = "Combined Strategy" if use_strategy else "NN Only"
-    log_filename = f"evaluation_{strategy_type.lower().replace(' ', '_')}.md"
+    base_folder = f"evaluation_results_{strategy_type.lower().replace(' ', '_')}"
+    os.makedirs(base_folder, exist_ok=True)
 
     print(f"Starting evaluation with {games} games for each matchup...")
     print(f"Using {strategy_type} for decision making.")
-    print(f"Logging games to {log_filename}")
+    print(f"Saving results to {base_folder}")
 
     start_time = time.time()
 
-    with open(log_filename, 'w') as log_file:
-        for matchup in results.keys():
-            log_file.write(f"# {matchup} {strategy_type}\n\n")
-            for i in range(games):
-                if i % 100 == 0:
-                    elapsed_time = time.time() - start_time
-                    games_per_second = (i * 3) / elapsed_time  # 3 matchups
-                    print(f"Completed {i} games for matchup {matchup}...")
-                    print(f"Games per second: {games_per_second:.2f}")
+    for matchup in results.keys():
+        matchup_folder = os.path.join(base_folder, matchup.replace(" ", "_"))
+        os.makedirs(matchup_folder, exist_ok=True)
 
-                ai1, ai2 = (ai_strong, ai_medium) if matchup == "Strong vs Medium" else \
-                    (ai_strong, ai_weak) if matchup == "Strong vs Weak" else \
-                        (ai_medium, ai_weak)
+        for i in range(games):
+            if i % 100 == 0:
+                elapsed_time = time.time() - start_time
+                games_per_second = (i * 3) / elapsed_time  # 3 matchups
+                print(f"Completed {i} games for matchup {matchup}...")
+                print(f"Games per second: {games_per_second:.2f}")
 
-                winner, moves = play_game(ai1, ai2, use_strategy)
-                if winner == PLAYER_RED:
-                    results[matchup][0] += 1
-                elif winner == PLAYER_BLUE:
-                    results[matchup][1] += 1
-                else:
-                    results[matchup][2] += 1
+            ai1, ai2 = (ai_strong, ai_medium) if matchup == "Strong vs Medium" else \
+                (ai_strong, ai_weak) if matchup == "Strong vs Weak" else \
+                    (ai_medium, ai_weak)
 
-                log_file.write(f"## Game {i + 1}\n\n")
-                for turn, (board, _, move) in enumerate(moves):
-                    log_file.write(f"### Turn {turn + 1}\n\n")
-                    log_file.write(board_to_markdown(board) + "\n\n")
+            winner, moves = play_game(ai1, ai2, use_strategy)
+            if winner == PLAYER_RED:
+                results[matchup][0] += 1
+            elif winner == PLAYER_BLUE:
+                results[matchup][1] += 1
+            else:
+                results[matchup][2] += 1
 
-                log_file.write(f"**Result: {'AI 1' if winner == PLAYER_RED else 'AI 2' if winner == PLAYER_BLUE else 'Draw'}**\n\n")
+            # Save game visualization
+            game = QuodGame()
+            for _, _, move in moves:
+                game.make_move(move[0], move[1], QUOD_RED if game.current_player == PLAYER_RED else QUOD_BLUE)
 
-                # Play reverse game
-                winner, moves = play_game(ai2, ai1, use_strategy)
-                if winner == PLAYER_RED:
-                    results[matchup][1] += 1
-                elif winner == PLAYER_BLUE:
-                    results[matchup][0] += 1
-                else:
-                    results[matchup][2] += 1
+            filename = os.path.join(matchup_folder, f"game_{i + 1}.svg")
+            svg.save_game_to_svg(game, filename)
 
-                log_file.write(f"## Game {i + 1} (Reverse)\n\n")
-                for turn, (board, _, move) in enumerate(moves):
-                    log_file.write(f"### Turn {turn + 1}\n\n")
-                    log_file.write(board_to_markdown(board) + "\n\n")
+            # Play reverse game
+            winner, moves = play_game(ai2, ai1, use_strategy)
+            if winner == PLAYER_RED:
+                results[matchup][1] += 1
+            elif winner == PLAYER_BLUE:
+                results[matchup][0] += 1
+            else:
+                results[matchup][2] += 1
 
-                log_file.write(
-                    f"**Result: {'AI 2' if winner == PLAYER_RED else 'AI 1' if winner == PLAYER_BLUE else 'Draw'}**\n\n")
 
-                # Write current results after each pair of games
-                log_file.write(
-                    f"### Current Results: {results[matchup][0]} - {results[matchup][1]} - {results[matchup][2]}\n\n")
-                log_file.flush()  # Ensure data is written to file
+def main():
+    parser = argparse.ArgumentParser(description="Quod AI Training and Evaluation")
+    parser.add_argument("--mode", choices=["train", "evaluate"], required=True, help="Mode of operation")
+    parser.add_argument("--games", type=int, default=10000, help="Number of games for training or evaluation")
+    parser.add_argument("--model", type=str, default="quod_ai_model.h5", help="Path to save/load the model")
+    parser.add_argument("--strategy", action="store_true", help="Use strategy in addition to neural network")
+    args = parser.parse_args()
 
-                # Write final results for this matchup
-            log_file.write(f"# Final Results for {matchup}\n\n")
-            log_file.write(f"**{results[matchup][0]} - {results[matchup][1]} - {results[matchup][2]}**\n\n")
+    configure_device()
 
-            # Print results to console
-            print(f"{matchup}: {results[matchup][0]} - {results[matchup][1]} - {results[matchup][2]}")
+    if args.mode == "train":
+        print(f"Creating and training model with {args.games} games...")
+        model = create_model()
+        trained_model = train_model(model, num_games=args.games)
+        trained_model.save(args.model)
+        print(f"Model trained and saved as '{args.model}'")
 
-        total_time = time.time() - start_time
-        print(f"\nEvaluation completed in {timedelta(seconds=int(total_time))}")
-        print(f"Average games per second: {(games * 3 * 2) / total_time:.2f}")
+    elif args.mode == "evaluate":
+        print(f"Loading model from '{args.model}'...")
+        trained_model = keras.models.load_model(args.model)
+        print("Model loaded successfully.")
 
-        print("\nFinal Results:")
+        print(f"\nEvaluating model with {args.games} games per matchup...")
+        results = evaluate_ai(trained_model, games=args.games, use_strategy=args.strategy)
+
+        print("\nEvaluation Results:")
         for matchup, scores in results.items():
             print(f"{matchup}: {scores[0]} - {scores[1]} - {scores[2]}")
 
-        return results
 
 if __name__ == "__main__":
-        parser = argparse.ArgumentParser(description="Quod AI Training and Evaluation")
-        parser.add_argument("--mode", choices=["train", "evaluate"], required=True, help="Mode of operation")
-        parser.add_argument("--games", type=int, default=10000, help="Number of games for training or evaluation")
-        args = parser.parse_args()
-
-        if args.mode == "train":
-            model = create_model()
-            trained_model = train_model(model, num_games=args.games)
-            trained_model.save('quod_ai_model.h5')
-            print("Model trained and saved as 'quod_ai_model.h5'")
-        elif args.mode == "evaluate":
-            print("Loading the saved model...")
-            trained_model = keras.models.load_model('quod_ai_model.h5')
-            print("Model loaded successfully.")
-
-            print("\nEvaluating with combined strategy and NN...")
-            results_with_strategy = evaluate_ai(trained_model, games=args.games, use_strategy=True)
-
-            print("\nEvaluating with only NN...")
-            results_only_nn = evaluate_ai(trained_model, games=args.games, use_strategy=False)
-
-            print("\nComparison of results:")
-            for matchup in results_with_strategy.keys():
-                print(f"\n{matchup}:")
-                print(
-                    f"  With strategy: {results_with_strategy[matchup][0]} - {results_with_strategy[matchup][1]} - {results_with_strategy[matchup][2]}")
-                print(
-                    f"  Only NN:      {results_only_nn[matchup][0]} - {results_only_nn[matchup][1]} - {results_only_nn[matchup][2]}")
+    main()

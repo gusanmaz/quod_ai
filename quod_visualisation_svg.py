@@ -1,8 +1,7 @@
 import html
 from quod_game import QUOD_RED, QUOD_BLUE, QUAZAR, EMPTY_CELL, DISABLED_CELL, BOARD_SIZE, PLAYER_RED, PLAYER_BLUE
 
-
-def board_to_svg(board, quazar_owners, last_move=None, winning_square=None):
+def board_to_svg(board, quazar_owners, last_move=None, winning_square=None, is_final_state=False, game=None):
     cell_size = 30
     board_size = cell_size * BOARD_SIZE
 
@@ -38,17 +37,17 @@ def board_to_svg(board, quazar_owners, last_move=None, winning_square=None):
         svg_content += f'<rect x="{x}" y="{y}" width="{cell_size}" height="{cell_size}" fill="none" stroke="green" stroke-width="3" />'
 
     # Draw winning square
-    if winning_square:
+    if is_final_state and winning_square and game:
+        square_sides = game.get_square_sides(winning_square)
         svg_content += '<g stroke="yellow" stroke-width="3" fill="none">'
-        for i in range(4):
-            x1, y1 = winning_square[i]
-            x2, y2 = winning_square[(i + 1) % 4]
-            svg_content += f'<line x1="{x1 * cell_size + cell_size / 2}" y1="{y1 * cell_size + cell_size / 2}" x2="{x2 * cell_size + cell_size / 2}" y2="{y2 * cell_size + cell_size / 2}" />'
+        for side in square_sides:
+            x1, y1 = side[0]
+            x2, y2 = side[1]
+            svg_content += f'<line x1="{y1 * cell_size + cell_size / 2}" y1="{x1 * cell_size + cell_size / 2}" x2="{y2 * cell_size + cell_size / 2}" y2="{x2 * cell_size + cell_size / 2}" />'
         svg_content += '</g>'
 
     svg_content += '</svg>'
     return svg_content
-
 
 def save_game_to_html(game, filename, player1, player2):
     with open(filename, 'w') as f:
@@ -75,13 +74,14 @@ def save_game_to_html(game, filename, player1, player2):
                 f.write(
                     f"<p>Piece: {'Quod' if piece_type in [QUOD_RED, QUOD_BLUE] else 'Quazar'}, Position: {move}</p>")
 
-                f.write(board_to_svg(board, quazar_owners, move, game.winning_square))
+                f.write(board_to_svg(board, quazar_owners, move, game.winning_square, is_final_state=False, game=game))
 
         winner = game.get_winner()
         winner_str = "Red" if winner == PLAYER_RED else "Blue" if winner == PLAYER_BLUE else "Draw"
         f.write(
             f"<h2>Final Result: <span style='color: {'red' if winner == PLAYER_RED else 'blue' if winner == PLAYER_BLUE else 'black'};'>{winner_str}</span></h2>")
 
+        # Display final board state with winning square highlighted
+        f.write(board_to_svg(board, quazar_owners, None, game.winning_square, is_final_state=True, game=game))
+
         f.write("</body></html>")
-
-

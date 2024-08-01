@@ -1,8 +1,7 @@
 import html
 from quod_game import QUOD_RED, QUOD_BLUE, QUAZAR, EMPTY_CELL, DISABLED_CELL, BOARD_SIZE, PLAYER_RED, PLAYER_BLUE
 
-
-def board_to_html(board, last_move=None, winning_square=None):
+def board_to_html(board, last_move=None, winning_square=None, is_final_state=False):
     cell_size = 30
 
     html_content = f"""
@@ -51,7 +50,7 @@ def board_to_html(board, last_move=None, winning_square=None):
             if last_move and (i, j) == last_move:
                 cell_class += " last-move"
 
-            if winning_square and (i, j) in winning_square:
+            if is_final_state and winning_square and (i, j) in winning_square:
                 cell_class += " winning-square"
 
             html_content += f'<td class="{cell_class}">{cell_content}</td>'
@@ -88,11 +87,14 @@ def save_game_to_html(game, filename, player1, player2):
                 f.write(
                     f"<p>Piece: {'Quod' if piece_type in [QUOD_RED, QUOD_BLUE] else 'Quazar'}, Position: {move}</p>")
 
-                f.write(board_to_html(board, move, game.winning_square))
+                f.write(board_to_html(board, move, game.winning_square, is_final_state=False))
 
         winner = game.get_winner()
         winner_str = "Red" if winner == PLAYER_RED else "Blue" if winner == PLAYER_BLUE else "Draw"
         f.write(
             f"<h2>Final Result: <span style='color: {'red' if winner == PLAYER_RED else 'blue' if winner == PLAYER_BLUE else 'black'};'>{winner_str}</span></h2>")
+
+        # Display final board state with winning square highlighted
+        f.write(board_to_html(board, None, game.winning_square, is_final_state=True))
 
         f.write("</body></html>")

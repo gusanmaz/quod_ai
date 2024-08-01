@@ -6,6 +6,10 @@
 ├── .idea
 │   ├── .gitignore
 ├── .idea
+│   ├── .name
+├── .idea
+│   ├── vcs.xml
+├── .idea
 │   ├── workspace.xml
 ├── __pycache__
 ├── quod_ai_training.py
@@ -15,6 +19,7 @@
 ├── quod_visualization.py
 ├── random_games
 ├── random_games_100
+├── random_games_good
 ├── random_games_not_bad
 └── random_play.py
 ```
@@ -26,9 +31,14 @@ mkdir -p ".idea"
 mkdir -p "__pycache__"
 mkdir -p "random_games"
 mkdir -p "random_games_100"
+mkdir -p "random_games_good"
 mkdir -p "random_games_not_bad"
 mkdir -p ".idea"
 touch ".idea/.gitignore"
+mkdir -p ".idea"
+touch ".idea/.name"
+mkdir -p ".idea"
+touch ".idea/vcs.xml"
 mkdir -p ".idea"
 touch ".idea/workspace.xml"
 touch "quod_ai_training.py"
@@ -53,6 +63,23 @@ touch "random_play.py"
 /dataSources/
 /dataSources.local.xml
 
+```
+
+### .idea/.name
+
+```
+random_game_10_canvas.html
+```
+
+### .idea/vcs.xml
+
+```XML
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="" vcs="Git" />
+  </component>
+</project>
 ```
 
 ### .idea/workspace.xml
@@ -557,6 +584,20 @@ class QuodGame:
                 return PLAYER_BLUE
         return 0  # Draw or game not finished
 
+    def get_square_sides(self, square_points):
+        def distance_sq(p1, p2):
+            return (p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2
+
+        distances = [(i, j, distance_sq(square_points[i], square_points[j]))
+                     for i in range(4) for j in range(i + 1, 4)]
+
+        distances.sort(key=lambda x: x[2])
+
+        # The first 4 distances should be the sides
+        sides = distances[:4]
+
+        return [(square_points[side[0]], square_points[side[1]]) for side in sides]
+
     def __str__(self):
         symbols = {EMPTY_CELL: ' ', QUOD_RED: 'R', QUOD_BLUE: 'B', QUAZAR: 'Q', DISABLED_CELL: 'X'}
         return '\n'.join([''.join([symbols[cell] for cell in row]) for row in self.board])
@@ -569,14 +610,20 @@ import html
 from quod_game import QUOD_RED, QUOD_BLUE, QUAZAR, EMPTY_CELL, DISABLED_CELL, BOARD_SIZE, PLAYER_RED, PLAYER_BLUE
 
 
-def board_to_canvas(board, quazar_owners, last_move=None, winning_square=None):
+def board_to_canvas(board, quazar_owners, turn, move, player, last_move=None, winning_squares=None, is_final=False):
     cell_size = 30
     board_size = cell_size * BOARD_SIZE
+    canvas_id = f"quodBoard_turn{turn}_move{move}_player{player}"
 
     canvas_script = f"""
-    <canvas id="quodBoard" width="{board_size}" height="{board_size}"></canvas>
+    <canvas id="{canvas_id}" width="{board_size}" height="{board_size}"></canvas>
     <script>
-        const canvas = document.getElementById('quodBoard');
+    (function() {{
+        const canvas = document.getElementById('{canvas_id}');
+        if (!canvas) {{
+            console.error('Canvas element not found:', '{canvas_id}');
+            return;
+        }}
         const ctx = canvas.getContext('2d');
         const cellSize = {cell_size};
 
@@ -631,20 +678,22 @@ def board_to_canvas(board, quazar_owners, last_move=None, winning_square=None):
             ctx.strokeRect(col * cellSize, row * cellSize, cellSize, cellSize);
         }}
 
-        // Draw winning square
-        if ({winning_square}) {{
-            const square = {winning_square};
+        // Draw winning squares
+        if ({is_final} && {winning_squares}) {{
+            const winning_squares = {winning_squares};
             ctx.strokeStyle = 'yellow';
             ctx.lineWidth = 3;
-            for (let i = 0; i < 4; i++) {{
-                const [r1, c1] = square[i];
-                const [r2, c2] = square[(i + 1) % 4];
+            for (const square of winning_squares) {{
                 ctx.beginPath();
-                ctx.moveTo(c1 * cellSize + cellSize/2, r1 * cellSize + cellSize/2);
-                ctx.lineTo(c2 * cellSize + cellSize/2, r2 * cellSize + cellSize/2);
+                ctx.moveTo(square[0][1] * cellSize + cellSize/2, square[0][0] * cellSize + cellSize/2);
+                for (let i = 1; i < 4; i++) {{
+                    ctx.lineTo(square[i][1] * cellSize + cellSize/2, square[i][0] * cellSize + cellSize/2);
+                }}
+                ctx.closePath();
                 ctx.stroke();
             }}
         }}
+    }})();
     </script>
     """
     return canvas_script
@@ -674,7 +723,9 @@ def save_game_to_html(game, filename, player1, player2):
                 f.write(
                     f"<p>Piece: {'Quod' if piece_type in [QUOD_RED, QUOD_BLUE] else 'Quazar'}, Position: {move}</p>")
 
-                f.write(board_to_canvas(board, quazar_owners, move, game.winning_square))
+                is_final = (turn == len(game.moves) and idx == len(moves) - 1)
+                f.write(board_to_canvas(board, quazar_owners, turn, idx, player, last_move=move,
+                                        winning_squares=game.winning_square, is_final=is_final))
 
         winner = game.get_winner()
         winner_str = "Red" if winner == PLAYER_RED else "Blue" if winner == PLAYER_BLUE else "Draw"
@@ -690,8 +741,7 @@ def save_game_to_html(game, filename, player1, player2):
 import html
 from quod_game import QUOD_RED, QUOD_BLUE, QUAZAR, EMPTY_CELL, DISABLED_CELL, BOARD_SIZE, PLAYER_RED, PLAYER_BLUE
 
-
-def board_to_svg(board, quazar_owners, last_move=None, winning_square=None):
+def board_to_svg(board, quazar_owners, last_move=None, winning_square=None, is_final_state=False, game=None):
     cell_size = 30
     board_size = cell_size * BOARD_SIZE
 
@@ -727,17 +777,17 @@ def board_to_svg(board, quazar_owners, last_move=None, winning_square=None):
         svg_content += f'<rect x="{x}" y="{y}" width="{cell_size}" height="{cell_size}" fill="none" stroke="green" stroke-width="3" />'
 
     # Draw winning square
-    if winning_square:
+    if is_final_state and winning_square and game:
+        square_sides = game.get_square_sides(winning_square)
         svg_content += '<g stroke="yellow" stroke-width="3" fill="none">'
-        for i in range(4):
-            x1, y1 = winning_square[i]
-            x2, y2 = winning_square[(i + 1) % 4]
-            svg_content += f'<line x1="{x1 * cell_size + cell_size / 2}" y1="{y1 * cell_size + cell_size / 2}" x2="{x2 * cell_size + cell_size / 2}" y2="{y2 * cell_size + cell_size / 2}" />'
+        for side in square_sides:
+            x1, y1 = side[0]
+            x2, y2 = side[1]
+            svg_content += f'<line x1="{y1 * cell_size + cell_size / 2}" y1="{x1 * cell_size + cell_size / 2}" x2="{y2 * cell_size + cell_size / 2}" y2="{x2 * cell_size + cell_size / 2}" />'
         svg_content += '</g>'
 
     svg_content += '</svg>'
     return svg_content
-
 
 def save_game_to_html(game, filename, player1, player2):
     with open(filename, 'w') as f:
@@ -764,17 +814,17 @@ def save_game_to_html(game, filename, player1, player2):
                 f.write(
                     f"<p>Piece: {'Quod' if piece_type in [QUOD_RED, QUOD_BLUE] else 'Quazar'}, Position: {move}</p>")
 
-                f.write(board_to_svg(board, quazar_owners, move, game.winning_square))
+                f.write(board_to_svg(board, quazar_owners, move, game.winning_square, is_final_state=False, game=game))
 
         winner = game.get_winner()
         winner_str = "Red" if winner == PLAYER_RED else "Blue" if winner == PLAYER_BLUE else "Draw"
         f.write(
             f"<h2>Final Result: <span style='color: {'red' if winner == PLAYER_RED else 'blue' if winner == PLAYER_BLUE else 'black'};'>{winner_str}</span></h2>")
 
+        # Display final board state with winning square highlighted
+        f.write(board_to_svg(board, quazar_owners, None, game.winning_square, is_final_state=True, game=game))
+
         f.write("</body></html>")
-
-
-
 ```
 
 ### quod_visualization.py
@@ -783,8 +833,7 @@ def save_game_to_html(game, filename, player1, player2):
 import html
 from quod_game import QUOD_RED, QUOD_BLUE, QUAZAR, EMPTY_CELL, DISABLED_CELL, BOARD_SIZE, PLAYER_RED, PLAYER_BLUE
 
-
-def board_to_html(board, last_move=None, winning_square=None):
+def board_to_html(board, last_move=None, winning_square=None, is_final_state=False):
     cell_size = 30
 
     html_content = f"""
@@ -833,7 +882,7 @@ def board_to_html(board, last_move=None, winning_square=None):
             if last_move and (i, j) == last_move:
                 cell_class += " last-move"
 
-            if winning_square and (i, j) in winning_square:
+            if is_final_state and winning_square and (i, j) in winning_square:
                 cell_class += " winning-square"
 
             html_content += f'<td class="{cell_class}">{cell_content}</td>'
@@ -870,12 +919,15 @@ def save_game_to_html(game, filename, player1, player2):
                 f.write(
                     f"<p>Piece: {'Quod' if piece_type in [QUOD_RED, QUOD_BLUE] else 'Quazar'}, Position: {move}</p>")
 
-                f.write(board_to_html(board, move, game.winning_square))
+                f.write(board_to_html(board, move, game.winning_square, is_final_state=False))
 
         winner = game.get_winner()
         winner_str = "Red" if winner == PLAYER_RED else "Blue" if winner == PLAYER_BLUE else "Draw"
         f.write(
             f"<h2>Final Result: <span style='color: {'red' if winner == PLAYER_RED else 'blue' if winner == PLAYER_BLUE else 'black'};'>{winner_str}</span></h2>")
+
+        # Display final board state with winning square highlighted
+        f.write(board_to_html(board, None, game.winning_square, is_final_state=True))
 
         f.write("</body></html>")
 ```
@@ -885,30 +937,23 @@ def save_game_to_html(game, filename, player1, player2):
 ```Python
 import os
 import argparse
-from quod_game import QuodGame, PLAYER_RED, PLAYER_BLUE, QUOD_RED, QUOD_BLUE, QUAZAR
-import quod_visualisation_svg
-import quod_visualisation_canvas
-import quod_visualization
 import random
+from quod_game import QuodGame, PLAYER_RED, PLAYER_BLUE, QUOD_RED, QUOD_BLUE, QUAZAR
+import quod_visualisation_svg as svg
+import quod_visualisation_canvas as canvas
+import quod_visualization as table
 
-can = quod_visualisation_canvas.save_game_to_html
-tab = quod_visualization.save_game_to_html
-svg = quod_visualisation_svg.save_game_to_html
-
-def import_visualization(vis_type):
+def get_visualization_function(vis_type):
     if vis_type == 'table':
-        save_game_to_html = tab
+        return table.save_game_to_html
     elif vis_type == 'svg':
-        save_game_to_html = svg
+        return svg.save_game_to_html
     elif vis_type == 'canvas':
-        save_game_to_html = can
+        return canvas.save_game_to_html
     else:
         raise ValueError(f"Unknown visualization type: {vis_type}")
-    return save_game_to_html
-
 
 def random_play_test(num_games: int = 1, vis_type: str = 'table'):
-    save_game_to_html = import_visualization(vis_type)
     os.makedirs("random_games", exist_ok=True)
 
     for game_num in range(num_games):
@@ -935,20 +980,30 @@ def random_play_test(num_games: int = 1, vis_type: str = 'table'):
         winner = game.get_winner()
         winner_str = "Red" if winner == PLAYER_RED else "Blue" if winner == PLAYER_BLUE else "Draw"
 
-        filename = f"random_games/random_game_{game_num + 1}_{vis_type}.html"
-        save_game_to_html(game, filename, "Random Player 1", "Random Player 2")
+        if vis_type == 'all':
+            for v_type in ['table', 'svg', 'canvas']:
+                filename = f"random_games/random_game_{game_num + 1}_{v_type}.html"
+                save_game_to_html = get_visualization_function(v_type)
+                save_game_to_html(game, filename, "Random Player 1", "Random Player 2")
+                print(f"Game log saved to {filename}")
+        else:
+            filename = f"random_games/random_game_{game_num + 1}_{vis_type}.html"
+            save_game_to_html = get_visualization_function(vis_type)
+            save_game_to_html(game, filename, "Random Player 1", "Random Player 2")
+            print(f"Game log saved to {filename}")
 
         print(f"Game {game_num + 1} completed. Winner: {winner_str}")
-        print(f"Game log saved to {filename}")
 
-
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="Play random Quod games")
     parser.add_argument("--games", type=int, default=1, help="Number of games to play")
-    parser.add_argument("--vis", type=str, choices=['table', 'svg', 'canvas'], default='table',
+    parser.add_argument("--vis", type=str, choices=['table', 'svg', 'canvas', 'all'], default='table',
                         help="Visualization type")
     args = parser.parse_args()
 
     random_play_test(args.games, args.vis)
+
+if __name__ == "__main__":
+    main()
 ```
 
